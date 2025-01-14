@@ -1,0 +1,343 @@
+---
+title: "Group Assignment 1"
+output: pdf_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+### Setup Libraries
+library(stats)
+library(dplyr)
+library(cluster)
+library(ggplot2)
+library(scales)
+library(cluster)
+library(factoextra)
+options(warn = -1)
+```
+
+# Reading Data
+```{r}
+# import dataset
+customer = read.csv("Wholesale customers data.csv")
+
+# view data
+head(customer)
+
+# summary of data for the six categories
+summary(customer[,2:8])
+```
+# Data Exploration and Processing 
+
+
+## Normalization
+### We want to normalzie the data to first check for outliers as it will help in
+### getting better visuals in box plots.
+```{r}
+# declare normalize function using min-max method
+normalize = function(x) {
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+# normalize iris dataset from columns 1 to 4
+customer_normalized = customer %>% mutate_at(c(3:8), normalize)
+summary(customer_normalized[,3:8])
+```
+
+
+## Boxplots
+```{r}
+# boxplots for each feature
+ggplot(data = customer_normalized, aes(x = "", y = Fresh)) +
+  geom_boxplot() +
+  coord_cartesian(ylim = c(0, 1)) +
+  ggtitle("Boxplot of Fresh")
+
+ggplot(data = customer_normalized, aes(x = "", y = Milk)) +
+  geom_boxplot() +
+  coord_cartesian(ylim = c(0, 1)) +
+  ggtitle("Boxplot of Milk")
+
+ggplot(data = customer_normalized, aes(x = "", y = Grocery)) +
+  geom_boxplot() +
+  coord_cartesian(ylim = c(0, 1)) +
+  ggtitle("Boxplot of Grocery")
+
+ggplot(data = customer_normalized, aes(x = "", y = Frozen)) +
+  geom_boxplot() +
+  coord_cartesian(ylim = c(0, 1)) +
+  ggtitle("Boxplot of Frozen")
+
+ggplot(data = customer_normalized, aes(x = "", y = Detergents_Paper)) +
+  geom_boxplot() +
+  coord_cartesian(ylim = c(0, 1)) +
+  ggtitle("Boxplot of Detergents_Paper")
+
+ggplot(data = customer_normalized, aes(x = "", y = Delicatessen)) +
+  geom_boxplot() +
+  coord_cartesian(ylim = c(0, 1)) +
+  ggtitle("Boxplot of Delicatessen")
+```
+
+### We can certainly see that there are outliers in the data(in each feature  
+### column) that need to treated/removed.
+
+
+## Outlier Flagging
+### We want to flag outliers on a row level, i.e., for each client and check the 
+### distribution of outliers for each feature colum among all the clients.
+```{r}
+# create list of outlier data points for each feature column
+fresh_outliers <- boxplot(customer$Fresh, plot=FALSE)$out
+milk_outliers <- boxplot(customer$Milk, plot=FALSE)$out
+grocery_outliers <- boxplot(customer$Grocery, plot=FALSE)$out
+frozen_outliers <- boxplot(customer$Frozen, plot=FALSE)$out
+detergent_outliers <- boxplot(customer$Detergents_Paper, plot=FALSE)$out
+delicate_outliers <- boxplot(customer$Delicatessen, plot=FALSE)$out
+
+# create an outlier flag based on the lists created above
+customer$Fresh_Outlier_Flag <- ifelse(customer$Fresh %in% fresh_outliers, 1, 0)
+customer$Milk_Outlier_Flag <- ifelse(customer$Milk %in% milk_outliers, 1, 0)
+customer$Grocery_Outlier_Flag <- ifelse(customer$Grocery %in% grocery_outliers
+                                        , 1, 0)
+customer$Frozen_Outlier_Flag <- ifelse(customer$Frozen %in% frozen_outliers
+                                       , 1, 0)
+customer$Detergent_Outlier_Flag <- ifelse(customer$Detergents_Paper %in% 
+                                            detergent_outliers, 1, 0)
+customer$Delicate_Outlier_Flag <- ifelse(customer$Delicatessen %in% 
+                                           delicate_outliers, 1, 0)
+
+# create a total outlier column containing total outliers per client across
+# all feature columns
+customer$Total_Outliers <- customer$Fresh_Outlier_Flag + 
+  customer$Milk_Outlier_Flag + customer$Grocery_Outlier_Flag + 
+  customer$Frozen_Outlier_Flag + customer$Detergent_Outlier_Flag + 
+  customer$Delicate_Outlier_Flag
+
+head(customer[,9:15])
+```
+
+## Outlier Summary
+```{r}
+# get outlier percentages for each feature column
+cat("Total Rows: ",nrow(customer), "\n")
+cat("Total Outliers: ",nrow(customer %>% filter(Total_Outliers>=1)), "\n\n")
+
+cat("Outliers Percentage\n")
+cat("-------------------\n")
+
+# Total
+cat("Total: ", percent(nrow(customer %>% filter(Total_Outliers>=1))
+                       / nrow(customer)), "\n")
+
+# Fresh
+cat("Fresh: ", percent(nrow(customer %>% filter(Fresh_Outlier_Flag==1))
+                       / nrow(customer)), "\n")
+
+# Milk
+cat("Milk: ", percent(nrow(customer %>% filter(Milk_Outlier_Flag==1))
+                      / nrow(customer)), "\n")
+
+# Grocery
+cat("Grocery: ", percent(nrow(customer %>% filter(Grocery_Outlier_Flag==1))
+                         / nrow(customer)), "\n")
+
+# Frozen
+cat("Frozen: ", percent(nrow(customer %>%
+                               filter(Frozen_Outlier_Flag==1))
+                        / nrow(customer)), "\n")
+
+# Detergent
+cat("Detergent Paper: ", percent(nrow(customer %>%
+                                        filter(Detergent_Outlier_Flag==1))
+                                 / nrow(customer)), "\n")
+
+# Delicatessen
+cat("Delicatessen: ", percent(nrow(customer %>%
+                                     filter(Delicate_Outlier_Flag==1))
+                              / nrow(customer)), "\n")
+```
+
+```{r}
+# get how many clients have 0,1,2.. outliers
+customer %>% group_by(Total_Outliers) %>% summarise(Count = n())
+```
+
+### We can see that out of 440 clients, 332 don't have the outliers present in 
+### the dataset. Our clustering approach will start with taking data with no
+### outliers and then we will start including clients with 1/2/3.. outlier per  
+### row to see if results drastically change. We will perform a different  
+### exploration exercise on the remaining outlier data to check for   
+### meaningful insights.
+
+
+# Clustering 
+
+
+## Remove Outliers
+```{r}
+# outlier dataframe
+customer_out = customer %>% filter(Total_Outliers >= 2)
+
+# removing outliers and storin in new dataframe
+customer_final = customer %>% filter(Total_Outliers < 2)
+head(customer_final)
+```
+### We tried running clustering models using k = 1,2,3,4. We observed that 
+### k = 2 is gving us the best results. Hence, the above piece of code takes 
+### Total Outliers < 2 to get the final dataset on which clustering will be 
+### performed.
+
+
+## Normalization
+### Normalizing data for running clustering models using min-max method
+```{r}
+# normalize
+customer_final_norm = customer_final %>% mutate_at(c(3:8), normalize)
+
+# create distance matrix with euclidean distance
+distance_matrix = dist(customer_final_norm[,3:8], method = "euclidean")
+```
+
+
+## K-Means Clustering 
+### Check for k value 
+```{r}
+# calculating SSE
+SSE_curve <- c()
+for (k in 1:10) {
+  kcluster = kmeans(customer_final_norm[,3:8], k)
+  sse = kcluster$tot.withinss
+  SSE_curve[k] = sse}
+
+# plot SSE against number of clusters
+plot(1:10, SSE_curve, type = "b", main = "SSE Curve", xlab = "k Value", ylab = "SSE")
+```
+
+### The elbow plot indicates we can take 2/3/4 clusters as the  
+### sum of squared errors start to get stagnant after k = 5
+
+
+### Run Model
+```{r}
+# run k-means clustering 
+cat("For k = 2: \n")
+kcluster = kmeans(customer_final_norm[,3:8], centers = 2)
+sc = silhouette(kcluster$cluster, dist = distance_matrix)
+summary(sc)
+
+cat("\n For k = 3: \n")
+kcluster = kmeans(customer_final_norm[,3:8], centers = 3)
+sc = silhouette(kcluster$cluster, dist = distance_matrix)
+summary(sc)
+
+cat("\n For k = 4: \n")
+kcluster = kmeans(customer_final_norm[,3:8], centers = 4)
+sc = silhouette(kcluster$cluster, dist = distance_matrix)
+summary(sc)
+```
+### We are observing that k=2 has the best silhouette score. Therefore, we will 
+### be going ahead with k=2 for K-Means
+
+```{r}
+kcluster = kmeans(customer_final_norm[,3:8], centers = 2)
+
+# get cluster labels into original dataframe
+customer_final$cluster = kcluster$cluster
+
+fviz_cluster(kcluster, geom = "point", data = customer_final_norm[,3:8]) + 
+  ggtitle("K-Means Clustering (k=2)")
+```
+
+
+## Hierarchical Clustering 
+### Check for k value
+```{r}
+# Hierarchical Clustering
+hierarchical = hclust(distance_matrix, method = "ward.D")
+plot(hierarchical)
+rect.hclust(hierarchical, k = 2)
+```
+
+### The dendogram indicates we can take 2/3 clusters.
+
+
+### Run Model
+```{r}
+cat("For k = 2: \n")
+customer_final_norm$cluster = cutree(hierarchical, k = 2)
+sc = silhouette(customer_final_norm$cluster, dist = distance_matrix)
+summary(sc)
+
+cat("For k = 3: \n")
+customer_final_norm$cluster = cutree(hierarchical, k = 3)
+sc = silhouette(customer_final_norm$cluster, dist = distance_matrix)
+summary(sc)
+```
+### We are observing that k=2 has the best silhouette score. Therefore, we will 
+### be going ahead with k=2 for Hierarchical
+
+```{r}
+clusters = cutree(hierarchical, k = 2)
+
+# Visualize clusters
+fviz_cluster(list(data = customer_final_norm[,3:8], geom = "point", cluster = clusters))
+
+
+# Visualize the dendrogram with rectangles around clusters
+fviz_dend(hierarchical, k = 2, rect = TRUE)
+
+```
+
+
+# Model Evaluation
+### We compared the silhouette score from best models from K-Means(0.449) 
+### and Hierarchical(0.376) clustering techniques and came to a conclusion that
+### we should use K-Means with k=2 as the clusters formed are easily 
+### distinguishable.
+
+
+# Result Interpretation
+### To intrepret the results, we are taking an average of each feature column
+### across each level of data - Cluster, Region and Channel to get the patterns
+### around spendings of each cluster. Using those insights, we will generate
+### recommendations for the XYZ company.
+```{r}
+customer_cluster_summary <- 
+  customer_final %>% 
+  group_by(cluster,Region,Channel) %>% 
+  summarise(
+    Count = n(),
+    Avg_Fresh = mean(Fresh),
+    Avg_Milk = mean(Milk),
+    Avg_Grocery = mean(Grocery),
+    Avg_Frozen = mean(Frozen),
+    Avg_Detergents_Paper = mean(Detergents_Paper),
+    Avg_Delicatessen = mean(Delicatessen)
+  )
+customer_cluster_summary
+#write.csv(customer_cluster_summary, "customer_cluster_summary.csv")
+```
+
+### We also want to check patterns for clients that came out as outliers during
+### our analysis.
+```{r}
+customer_outlier_summary <- 
+  customer_out %>% 
+  group_by(Region,Channel) %>% 
+  summarise(
+    Count = n(),
+    Avg_Fresh = mean(Fresh),
+    Avg_Milk = mean(Milk),
+    Avg_Grocery = mean(Grocery),
+    Avg_Frozen = mean(Frozen),
+    Avg_Detergents_Paper = mean(Detergents_Paper),
+    Avg_Delicatessen = mean(Delicatessen)
+  )
+customer_outlier_summary
+#write.csv(customer_outlier_summary, "customer_outliers_summary.csv")
+```
